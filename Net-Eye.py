@@ -8,50 +8,60 @@ from PIL import Image, ImageDraw
 # Settings -- unchanged from the original
 # ----------------------------------------------------------------------
 
-SIZE = 70
-CHECK_EVERY_MS = 5000
-TIMEOUT_SECONDS = 2
+SIZE            =   70
+CHECK_EVERY_MS  = 5000
+TIMEOUT_SECONDS =    2
 
 GREEN = "#27c93f"
-RED = "#ff3b30"
-GRAY = "#808080"
+RED   = "#ff3b30"
+GRAY  = "#808080"
+
+# Wi-Fi icon settings (all dimensions are in final on-screen pixels).
+WIFI_SIZE         = 40   # Overall Wi-Fi symbol width
+WIFI_X_OFFSET     =  0   # Shift right (+) or left (-) from circle centre
+WIFI_Y_OFFSET     = 10   # Shift down (+) or up (-) from circle centre
+WIFI_STROKE       =  4   # Thickness of the Wi-Fi arcs
+WIFI_DOT_RADIUS   =  4   # Radius of the centre dot (pixels)
+WIFI_DOT_GAP      =  3   # Clear gap between dot edge and innermost arc
+WIFI_ARC_SPACING  =  7   # Radial spacing between adjacent arcs
+WIFI_COLOR        = "#000000"
 
 # ----------------------------------------------------------------------
 # NEW: a few Win32 definitions needed for a true alpha-transparent window
 # ----------------------------------------------------------------------
 
-user32 = ctypes.windll.user32
-gdi32 = ctypes.windll.gdi32
+user32   = ctypes.windll.user32
+gdi32    = ctypes.windll.gdi32
 kernel32 = ctypes.windll.kernel32
 
-WS_EX_LAYERED = 0x00080000
-WS_EX_TOPMOST = 0x00000008
+WS_EX_LAYERED    = 0x00080000
+WS_EX_TOPMOST    = 0x00000008
 WS_EX_TOOLWINDOW = 0x00000080
-WS_POPUP = 0x80000000
+WS_POPUP         = 0x80000000
 
-WM_DESTROY = 0x0002
+WM_DESTROY     = 0x0002
 WM_LBUTTONDOWN = 0x0201
-WM_RBUTTONUP = 0x0205
-WM_TIMER = 0x0113
-WM_COMMAND = 0x0111
-WM_APP_STATUS = 0x8001
+WM_RBUTTONUP   = 0x0205
+WM_TIMER       = 0x0113
+WM_COMMAND     = 0x0111
+WM_APP_STATUS  = 0x8001
 
 WM_NCLBUTTONDOWN = 0x00A1
-HTCAPTION = 2
+HTCAPTION        = 2
 
-MF_STRING = 0x0000
+MF_STRING       = 0x0000
 TPM_RIGHTBUTTON = 0x0002
-TPM_RETURNCMD = 0x0100
+TPM_RETURNCMD   = 0x0100
 
-ULW_ALPHA = 0x00000002
-AC_SRC_OVER = 0x00
-AC_SRC_ALPHA = 0x01
-BI_RGB = 0
+ULW_ALPHA      = 0x00000002
+AC_SRC_OVER    = 0x00
+AC_SRC_ALPHA   = 0x01
+BI_RGB         = 0
 DIB_RGB_COLORS = 0
 
 ID_CHECK_NOW = 1
-ID_EXIT = 2
-TIMER_ID = 1
+ID_EXIT      = 2
+TIMER_ID     = 1
 
 IDC_ARROW = 32512
 
@@ -139,8 +149,26 @@ class WNDCLASSW(ctypes.Structure):
 
 SCALE = 4
 
+def draw_wifi_icon(draw, disconnected=False):
+    """Draw a centred, scalable Wi-Fi icon at supersampled resolution."""
+    cx = (SIZE / 2 + WIFI_X_OFFSET) * SCALE
+    cy = (SIZE / 2 + WIFI_Y_OFFSET) * SCALE
+    stroke = max(1, round(WIFI_STROKE * SCALE))
+    dot_r = WIFI_DOT_RADIUS * SCALE
 
-def make_circle(color):
+    # Pillow draws arc strokes inward from their bounding radii.
+    # Anchor the innermost arc to the dot, keeping the clear gap fixed
+    # when WIFI_DOT_RADIUS changes. Each outer arc adds a fixed step.
+    inner_r = (WIFI_DOT_RADIUS + WIFI_DOT_GAP + WIFI_STROKE) * SCALE
+    for index in (2, 1, 0):
+        r = inner_r + index * WIFI_ARC_SPACING * SCALE
+        draw.arc((round(cx-r), round(cy-r), round(cx+r), round(cy+r)),
+                 start=225, end=315, fill=WIFI_COLOR, width=stroke)
+
+    draw.ellipse((round(cx-dot_r), round(cy-dot_r),
+                  round(cx+dot_r), round(cy+dot_r)), fill=WIFI_COLOR)
+
+def make_circle(color, disconnected=False):
     big_size = SIZE * SCALE
     image = Image.new("RGBA", (big_size, big_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -153,6 +181,8 @@ def make_circle(color):
         outline="#202020",
         width=3 * SCALE,
     )
+
+    draw_wifi_icon(draw, disconnected=disconnected)
 
     image = image.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
 
@@ -168,8 +198,8 @@ def make_circle(color):
     return bytes(pixels)
 
 
-def draw_circle(hwnd, color):
-    pixels = make_circle(color)
+def draw_circle(hwnd, color, disconnected=False):
+    pixels = make_circle(color, disconnected=disconnected)
 
     screen_dc = user32.GetDC(None)
     memory_dc = gdi32.CreateCompatibleDC(screen_dc)
@@ -313,7 +343,7 @@ def window_proc(window, message, wparam, lparam):
         return 0
 
     if message == WM_APP_STATUS:
-        draw_circle(window, GREEN if wparam else RED)
+        draw_circle(window, GREEN if wparam else RED, disconnected=not bool(wparam))
         return 0
 
     if message == WM_DESTROY:
