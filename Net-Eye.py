@@ -1,5 +1,6 @@
 import urllib.request
 import threading
+import functools
 import ctypes
 from ctypes import wintypes
 from PIL import Image, ImageDraw
@@ -11,6 +12,7 @@ from PIL import Image, ImageDraw
 SIZE            =   70
 CHECK_EVERY_MS  = 5000
 TIMEOUT_SECONDS =    2
+ARC_STEP_MS     =  150   # Delay between arcs while a check is animating
 
 GREEN = "#27c93f"
 RED   = "#ff3b30"
@@ -67,6 +69,7 @@ DIB_RGB_COLORS = 0
 ID_CHECK_NOW = 1
 ID_EXIT      = 2
 TIMER_ID     = 1
+ANIM_TIMER_ID = 2
 
 IDC_ARROW = 32512
 
@@ -294,16 +297,21 @@ SCALE = 4
 # All sizes above are given at 100 % and multiplied by this when drawing.
 dpi_scale = 1.0
 
-# Last drawn colour and state, so the circle can be redrawn on DPI change.
-current_look = (GRAY, False)
+# Last drawn colour and number of arcs, so the circle can be redrawn
+# on DPI change and the animation knows which colour to keep.
+current_look = (GRAY, 3)
 
 
 def window_size():
     return round(SIZE * dpi_scale)
 
 
-def draw_wifi_icon(draw, disconnected=False):
-    """Draw a centred, scalable Wi-Fi icon at supersampled resolution."""
+def draw_wifi_icon(draw, arcs=3):
+    """Draw a centred, scalable Wi-Fi icon at supersampled resolution.
+
+    arcs is how many arcs to draw (0-3), counted from the innermost one;
+    the dot is always drawn.
+    """
     s = dpi_scale * SCALE
     cx = window_size() * SCALE / 2 + WIFI_X_OFFSET * s
     cy = window_size() * SCALE / 2 + WIFI_Y_OFFSET * s
@@ -314,7 +322,7 @@ def draw_wifi_icon(draw, disconnected=False):
     # Anchor the innermost arc to the dot, keeping the clear gap fixed
     # when WIFI_DOT_RADIUS changes. Each outer arc adds a fixed step.
     inner_r = (WIFI_DOT_RADIUS + WIFI_DOT_GAP + WIFI_STROKE) * s
-    for index in (2, 1, 0):
+    for index in range(arcs):
         r = inner_r + index * WIFI_ARC_SPACING * s
         draw.arc((round(cx-r), round(cy-r), round(cx+r), round(cy+r)),
                  start=225, end=315, fill=WIFI_COLOR, width=stroke)
@@ -322,7 +330,11 @@ def draw_wifi_icon(draw, disconnected=False):
     draw.ellipse((round(cx-dot_r), round(cy-dot_r),
                   round(cx+dot_r), round(cy+dot_r)), fill=WIFI_COLOR)
 
-def make_circle(color, disconnected=False):
+# Only a handful of distinct images exist (colour x arcs x DPI), so each
+# is rendered once; animation frames then cost almost nothing. The dpi
+# argument is not used directly, it only keeps the cache per DPI.
+@functools.lru_cache(maxsize=None)
+def make_circle(color, arcs, dpi):
     size = window_size()
     big_size = size * SCALE
     image = Image.new("RGBA", (big_size, big_size), (0, 0, 0, 0))
@@ -338,7 +350,7 @@ def make_circle(color, disconnected=False):
         width=round(3 * s),
     )
 
-    draw_wifi_icon(draw, disconnected=disconnected)
+    draw_wifi_icon(draw, arcs=arcs)
 
     image = image.resize((size, size), Image.Resampling.LANCZOS)
 
@@ -354,11 +366,11 @@ def make_circle(color, disconnected=False):
     return bytes(pixels)
 
 
-def draw_circle(hwnd, color, disconnected=False):
+def draw_circle(hwnd, color, arcs=3):
     global current_look
-    current_look = (color, disconnected)
+    current_look = (color, arcs)
 
-    pixels = make_circle(color, disconnected=disconnected)
+    pixels = make_circle(color, arcs, dpi_scale)
     width = window_size()
 
     screen_dc = user32.GetDC(None)
@@ -438,11 +450,17 @@ def internet_is_up():
 hwnd = None
 check_lock = threading.Lock()
 
+# Animation state, only touched from the Windows message loop thread.
+animating      = False
+pending_result = None   # None while the check runs, then True / False
+
 
 def check_internet():
     # Skip this check if the previous one is still running (e.g. slow DNS).
     if not check_lock.acquire(blocking=False):
         return
+
+    start_animation()
 
     def worker():
         try:
@@ -459,6 +477,39 @@ def check_internet():
         )
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+# ----------------------------------------------------------------------
+# Check animation: the arcs are drawn one by one, smallest first, in the
+# circle's current colour. The sweep repeats until the check result is in,
+# then the circle shows all arcs on green, or just the dot on red.
+# ----------------------------------------------------------------------
+
+def start_animation():
+    global animating, pending_result
+    pending_result = None
+    if animating:
+        return
+    animating = True
+    draw_circle(hwnd, current_look[0], arcs=0)
+    user32.SetTimer(hwnd, ANIM_TIMER_ID, ARC_STEP_MS, None)
+
+
+def animation_step():
+    global animating
+    color, arcs = current_look
+
+    if arcs < 3:
+        draw_circle(hwnd, color, arcs=arcs + 1)
+    elif pending_result is None:
+        draw_circle(hwnd, color, arcs=0)      # still checking: sweep again
+    else:
+        user32.KillTimer(hwnd, ANIM_TIMER_ID)
+        animating = False
+        if pending_result:
+            draw_circle(hwnd, GREEN, arcs=3)
+        else:
+            draw_circle(hwnd, RED, arcs=0)
 
 
 # ----------------------------------------------------------------------
@@ -496,7 +547,7 @@ def show_menu(hwnd):
 
 @WNDPROC
 def window_proc(window, message, wparam, lparam):
-    global dpi_scale
+    global dpi_scale, pending_result
 
     if message == WM_LBUTTONDOWN:
         # Same behaviour as the old Tkinter drag code.
@@ -511,10 +562,13 @@ def window_proc(window, message, wparam, lparam):
     if message == WM_TIMER:
         if wparam == TIMER_ID:
             check_internet()
+        elif wparam == ANIM_TIMER_ID:
+            animation_step()
         return 0
 
     if message == WM_APP_STATUS:
-        draw_circle(window, GREEN if wparam else RED, disconnected=not bool(wparam))
+        # The running animation picks this up when its sweep completes.
+        pending_result = bool(wparam)
         return 0
 
     if message == WM_DPICHANGED:
@@ -535,6 +589,7 @@ def window_proc(window, message, wparam, lparam):
 
     if message == WM_DESTROY:
         user32.KillTimer(window, TIMER_ID)
+        user32.KillTimer(window, ANIM_TIMER_ID)
         user32.PostQuitMessage(0)
         return 0
 
