@@ -142,6 +142,127 @@ class WNDCLASSW(ctypes.Structure):
     ]
 
 
+# Full 64-bit prototypes for every Win32 call used below. Without these,
+# ctypes assumes 32-bit int arguments and results, truncating handles.
+UINT_PTR = ctypes.c_size_t
+
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype  = wintypes.HMODULE
+
+user32.GetDC.argtypes = [wintypes.HWND]
+user32.GetDC.restype  = wintypes.HDC
+user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+user32.ReleaseDC.restype  = ctypes.c_int
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.GetWindowRect.restype  = wintypes.BOOL
+user32.UpdateLayeredWindow.argtypes = [
+    wintypes.HWND,
+    wintypes.HDC,
+    ctypes.POINTER(wintypes.POINT),
+    ctypes.POINTER(wintypes.SIZE),
+    wintypes.HDC,
+    ctypes.POINTER(wintypes.POINT),
+    wintypes.COLORREF,
+    ctypes.POINTER(BLENDFUNCTION),
+    wintypes.DWORD,
+]
+user32.UpdateLayeredWindow.restype = wintypes.BOOL
+
+user32.PostMessageW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.PostMessageW.restype = wintypes.BOOL
+user32.SendMessageW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.SendMessageW.restype = LRESULT
+
+user32.CreatePopupMenu.argtypes = []
+user32.CreatePopupMenu.restype  = wintypes.HMENU
+user32.AppendMenuW.argtypes = [
+    wintypes.HMENU, wintypes.UINT, UINT_PTR, wintypes.LPCWSTR
+]
+user32.AppendMenuW.restype = wintypes.BOOL
+user32.TrackPopupMenu.argtypes = [
+    wintypes.HMENU,
+    wintypes.UINT,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.HWND,
+    ctypes.c_void_p,
+]
+user32.TrackPopupMenu.restype = wintypes.BOOL
+user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.DestroyMenu.restype  = wintypes.BOOL
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+user32.GetCursorPos.restype  = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype  = wintypes.BOOL
+user32.ReleaseCapture.argtypes = []
+user32.ReleaseCapture.restype  = wintypes.BOOL
+
+user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+user32.LoadCursorW.restype  = wintypes.HANDLE
+user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+user32.RegisterClassW.restype  = wintypes.ATOM
+user32.CreateWindowExW.argtypes = [
+    wintypes.DWORD,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    wintypes.DWORD,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.HWND,
+    wintypes.HMENU,
+    wintypes.HINSTANCE,
+    wintypes.LPVOID,
+]
+user32.CreateWindowExW.restype = wintypes.HWND
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype  = wintypes.BOOL
+user32.DestroyWindow.argtypes = [wintypes.HWND]
+user32.DestroyWindow.restype  = wintypes.BOOL
+
+user32.SetTimer.argtypes = [
+    wintypes.HWND, UINT_PTR, wintypes.UINT, ctypes.c_void_p
+]
+user32.SetTimer.restype = UINT_PTR
+user32.KillTimer.argtypes = [wintypes.HWND, UINT_PTR]
+user32.KillTimer.restype  = wintypes.BOOL
+
+user32.GetMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT
+]
+user32.GetMessageW.restype = wintypes.BOOL
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.TranslateMessage.restype  = wintypes.BOOL
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.restype  = LRESULT
+user32.PostQuitMessage.argtypes = [ctypes.c_int]
+user32.PostQuitMessage.restype  = None
+
+gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+gdi32.CreateCompatibleDC.restype  = wintypes.HDC
+gdi32.CreateDIBSection.argtypes = [
+    wintypes.HDC,
+    ctypes.POINTER(BITMAPINFO),
+    wintypes.UINT,
+    ctypes.POINTER(ctypes.c_void_p),
+    wintypes.HANDLE,
+    wintypes.DWORD,
+]
+gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+gdi32.SelectObject.restype  = wintypes.HGDIOBJ
+gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+gdi32.DeleteObject.restype  = wintypes.BOOL
+gdi32.DeleteDC.argtypes = [wintypes.HDC]
+gdi32.DeleteDC.restype  = wintypes.BOOL
+
+
 # ----------------------------------------------------------------------
 # NEW: draw the circle with real alpha, so the edge blends with whatever
 # is behind it. Pillow draws it 4x larger and downsamples it smoothly.
