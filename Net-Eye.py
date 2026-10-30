@@ -392,7 +392,7 @@ def internet_is_up():
         ) as response:
             # Captive portals answer with their login page (200), not 204.
             return response.status == 204
-    except:
+    except OSError:
         return False
 
 
