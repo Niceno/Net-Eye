@@ -13,6 +13,7 @@ SIZE            =   70
 CHECK_EVERY_MS  = 5000
 TIMEOUT_SECONDS =    2
 ARC_STEP_MS     =  150   # Delay between arcs while a check is animating
+ANIMATE_EVERY   =    6   # Animate every n-th check (1 = every check)
 
 GREEN = "#27c93f"
 RED   = "#ff3b30"
@@ -454,14 +455,23 @@ check_lock = threading.Lock()
 # Animation state, only touched from the Windows message loop thread.
 animating      = False
 pending_result = None   # None while the check runs, then True / False
+check_count    = 0
 
 
-def check_internet():
+def check_internet(animate=False):
+    """Start a check; animate it if asked to, or if it is every n-th one."""
+    global check_count
+
     # Skip this check if the previous one is still running (e.g. slow DNS).
+    # An explicit request still animates, waiting for the running check.
     if not check_lock.acquire(blocking=False):
+        if animate:
+            start_animation()
         return
 
-    start_animation()
+    if animate or check_count % ANIMATE_EVERY == 0:
+        start_animation()
+    check_count += 1
 
     def worker():
         try:
@@ -507,10 +517,14 @@ def animation_step():
     else:
         user32.KillTimer(hwnd, ANIM_TIMER_ID)
         animating = False
-        if pending_result:
-            draw_circle(hwnd, GREEN, arcs=3)
-        else:
-            draw_circle(hwnd, RED, arcs=0)
+        show_result(pending_result)
+
+
+def show_result(online):
+    if online:
+        draw_circle(hwnd, GREEN, arcs=3)
+    else:
+        draw_circle(hwnd, RED, arcs=0)
 
 
 # ----------------------------------------------------------------------
@@ -541,7 +555,7 @@ def show_menu(hwnd):
     user32.DestroyMenu(menu)
 
     if command == ID_CHECK_NOW:
-        check_internet()
+        check_internet(animate=True)
     elif command == ID_EXIT:
         user32.DestroyWindow(hwnd)
 
@@ -568,8 +582,17 @@ def window_proc(window, message, wparam, lparam):
         return 0
 
     if message == WM_APP_STATUS:
-        # The running animation picks this up when its sweep completes.
-        pending_result = bool(wparam)
+        # A running animation picks this up when its sweep completes.
+        # A silent check shows its result right away, except that coming
+        # back online builds the arcs up with one sweep.
+        online = bool(wparam)
+        if animating:
+            pending_result = online
+        elif online and current_look[0] != GREEN:
+            start_animation()
+            pending_result = online
+        else:
+            show_result(online)
         return 0
 
     if message == WM_DPICHANGED:
