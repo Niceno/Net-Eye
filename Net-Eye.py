@@ -397,11 +397,19 @@ def internet_is_up():
 
 
 hwnd = None
+check_lock = threading.Lock()
 
 
 def check_internet():
+    # Skip this check if the previous one is still running (e.g. slow DNS).
+    if not check_lock.acquire(blocking=False):
+        return
+
     def worker():
-        online = internet_is_up()
+        try:
+            online = internet_is_up()
+        finally:
+            check_lock.release()
 
         # Tell the Windows message loop to redraw the circle.
         user32.PostMessageW(
