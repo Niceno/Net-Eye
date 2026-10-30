@@ -18,7 +18,8 @@ GREEN = "#27c93f"
 RED   = "#ff3b30"
 GRAY  = "#808080"
 
-# Wi-Fi icon settings (all dimensions are in final on-screen pixels).
+# Wi-Fi icon settings (all dimensions are in pixels at 100 % display
+# scaling; they grow with Windows scaling, e.g. by 10 % at 110 %).
 WIFI_X_OFFSET     =  0   # Shift right (+) or left (-) from circle centre
 WIFI_Y_OFFSET     = 10   # Shift down (+) or up (-) from circle centre
 WIFI_STROKE       =  4   # Thickness of the Wi-Fi arcs
