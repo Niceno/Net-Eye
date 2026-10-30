@@ -389,8 +389,9 @@ def internet_is_up():
         with urllib.request.urlopen(
             "https://www.google.com/generate_204",
             timeout=TIMEOUT_SECONDS,
-        ):
-            return True
+        ) as response:
+            # Captive portals answer with their login page (200), not 204.
+            return response.status == 204
     except:
         return False
 
