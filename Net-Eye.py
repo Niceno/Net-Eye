@@ -45,6 +45,12 @@ WM_RBUTTONUP   = 0x0205
 WM_TIMER       = 0x0113
 WM_COMMAND     = 0x0111
 WM_APP_STATUS  = 0x8001
+WM_DPICHANGED  = 0x02E0
+
+SWP_NOZORDER   = 0x0004
+SWP_NOACTIVATE = 0x0010
+
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
 WM_NCLBUTTONDOWN = 0x00A1
 HTCAPTION        = 2
@@ -225,6 +231,21 @@ user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.ShowWindow.restype  = wintypes.BOOL
 user32.DestroyWindow.argtypes = [wintypes.HWND]
 user32.DestroyWindow.restype  = wintypes.BOOL
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
+]
+user32.SetWindowPos.restype = wintypes.BOOL
+
+user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+user32.SetProcessDpiAwarenessContext.restype  = wintypes.BOOL
+user32.GetDpiForWindow.argtypes = [wintypes.HWND]
+user32.GetDpiForWindow.restype  = wintypes.UINT
 
 user32.SetTimer.argtypes = [
     wintypes.HWND, UINT_PTR, wintypes.UINT, ctypes.c_void_p
@@ -270,19 +291,32 @@ gdi32.DeleteDC.restype  = wintypes.BOOL
 
 SCALE = 4
 
+# Display scaling of the monitor the window is on (1.0 = 100 %, 96 DPI).
+# All sizes above are given at 100 % and multiplied by this when drawing.
+dpi_scale = 1.0
+
+# Last drawn colour and state, so the circle can be redrawn on DPI change.
+current_look = (GRAY, False)
+
+
+def window_size():
+    return round(SIZE * dpi_scale)
+
+
 def draw_wifi_icon(draw, disconnected=False):
     """Draw a centred, scalable Wi-Fi icon at supersampled resolution."""
-    cx = (SIZE / 2 + WIFI_X_OFFSET) * SCALE
-    cy = (SIZE / 2 + WIFI_Y_OFFSET) * SCALE
-    stroke = max(1, round(WIFI_STROKE * SCALE))
-    dot_r = WIFI_DOT_RADIUS * SCALE
+    s = dpi_scale * SCALE
+    cx = window_size() * SCALE / 2 + WIFI_X_OFFSET * s
+    cy = window_size() * SCALE / 2 + WIFI_Y_OFFSET * s
+    stroke = max(1, round(WIFI_STROKE * s))
+    dot_r = WIFI_DOT_RADIUS * s
 
     # Pillow draws arc strokes inward from their bounding radii.
     # Anchor the innermost arc to the dot, keeping the clear gap fixed
     # when WIFI_DOT_RADIUS changes. Each outer arc adds a fixed step.
-    inner_r = (WIFI_DOT_RADIUS + WIFI_DOT_GAP + WIFI_STROKE) * SCALE
+    inner_r = (WIFI_DOT_RADIUS + WIFI_DOT_GAP + WIFI_STROKE) * s
     for index in (2, 1, 0):
-        r = inner_r + index * WIFI_ARC_SPACING * SCALE
+        r = inner_r + index * WIFI_ARC_SPACING * s
         draw.arc((round(cx-r), round(cy-r), round(cx+r), round(cy+r)),
                  start=225, end=315, fill=WIFI_COLOR, width=stroke)
 
@@ -290,22 +324,24 @@ def draw_wifi_icon(draw, disconnected=False):
                   round(cx+dot_r), round(cy+dot_r)), fill=WIFI_COLOR)
 
 def make_circle(color, disconnected=False):
-    big_size = SIZE * SCALE
+    size = window_size()
+    big_size = size * SCALE
     image = Image.new("RGBA", (big_size, big_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    margin = 5 * SCALE
+    s = dpi_scale * SCALE
+    margin = round(5 * s)
 
     draw.ellipse(
         (margin, margin, big_size - margin, big_size - margin),
         fill=color,
         outline="#202020",
-        width=3 * SCALE,
+        width=round(3 * s),
     )
 
     draw_wifi_icon(draw, disconnected=disconnected)
 
-    image = image.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+    image = image.resize((size, size), Image.Resampling.LANCZOS)
 
     # UpdateLayeredWindow expects premultiplied BGRA pixels.
     pixels = bytearray(image.tobytes("raw", "BGRA"))
@@ -320,15 +356,19 @@ def make_circle(color, disconnected=False):
 
 
 def draw_circle(hwnd, color, disconnected=False):
+    global current_look
+    current_look = (color, disconnected)
+
     pixels = make_circle(color, disconnected=disconnected)
+    width = window_size()
 
     screen_dc = user32.GetDC(None)
     memory_dc = gdi32.CreateCompatibleDC(screen_dc)
 
     bmi = BITMAPINFO()
     bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-    bmi.bmiHeader.biWidth = SIZE
-    bmi.bmiHeader.biHeight = -SIZE       # top-down bitmap
+    bmi.bmiHeader.biWidth = width
+    bmi.bmiHeader.biHeight = -width      # top-down bitmap
     bmi.bmiHeader.biPlanes = 1
     bmi.bmiHeader.biBitCount = 32
     bmi.bmiHeader.biCompression = BI_RGB
@@ -353,7 +393,7 @@ def draw_circle(hwnd, color, disconnected=False):
 
     destination = wintypes.POINT(rect.left, rect.top)
     source = wintypes.POINT(0, 0)
-    size = wintypes.SIZE(SIZE, SIZE)
+    size = wintypes.SIZE(width, width)
 
     blend = BLENDFUNCTION(
         AC_SRC_OVER,
@@ -457,6 +497,8 @@ def show_menu(hwnd):
 
 @WNDPROC
 def window_proc(window, message, wparam, lparam):
+    global dpi_scale
+
     if message == WM_LBUTTONDOWN:
         # Same behaviour as the old Tkinter drag code.
         user32.ReleaseCapture()
@@ -474,6 +516,22 @@ def window_proc(window, message, wparam, lparam):
 
     if message == WM_APP_STATUS:
         draw_circle(window, GREEN if wparam else RED, disconnected=not bool(wparam))
+        return 0
+
+    if message == WM_DPICHANGED:
+        # Moved to a monitor with different scaling: resize and redraw.
+        dpi_scale = (wparam & 0xFFFF) / 96
+        suggested = wintypes.RECT.from_address(lparam)
+        user32.SetWindowPos(
+            window,
+            None,
+            suggested.left,
+            suggested.top,
+            window_size(),
+            window_size(),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+        draw_circle(window, *current_look)
         return 0
 
     if message == WM_DESTROY:
@@ -502,6 +560,10 @@ window_class.lpszClassName = class_name
 
 user32.RegisterClassW(ctypes.byref(window_class))
 
+# Handle display scaling ourselves, so Windows does not blur the window
+# by stretching it. Must happen before the window is created.
+user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+
 hwnd = user32.CreateWindowExW(
     WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
     class_name,
@@ -516,6 +578,8 @@ hwnd = user32.CreateWindowExW(
     hinstance,
     None,
 )
+
+dpi_scale = user32.GetDpiForWindow(hwnd) / 96
 
 # Start gray, exactly as before.
 draw_circle(hwnd, GRAY)
