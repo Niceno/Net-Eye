@@ -17,7 +17,6 @@ RED   = "#ff3b30"
 GRAY  = "#808080"
 
 # Wi-Fi icon settings (all dimensions are in final on-screen pixels).
-WIFI_SIZE         = 40   # Overall Wi-Fi symbol width
 WIFI_X_OFFSET     =  0   # Shift right (+) or left (-) from circle centre
 WIFI_Y_OFFSET     = 10   # Shift down (+) or up (-) from circle centre
 WIFI_STROKE       =  4   # Thickness of the Wi-Fi arcs
